@@ -19,6 +19,7 @@ public class PlayerMovement : MonoBehaviour
 
     [Header("Gun Settings")]
     public GameObject gunObject; // Kéo GameObject cây súng vào đây
+    public GunFire gunFire;      // Kéo script GunFire (gắn trên gun model) vào đây
 
     private Rigidbody rb;
     private bool isGrounded;
@@ -36,6 +37,12 @@ public class PlayerMovement : MonoBehaviour
         if (anim == null)
         {
             anim = GetComponentInChildren<Animator>();
+        }
+
+        // Tu dong tim GunFire neu chua keo vao Inspector
+        if (gunFire == null)
+        {
+            gunFire = GetComponentInChildren<GunFire>();
         }
     }
 
@@ -61,15 +68,27 @@ public class PlayerMovement : MonoBehaviour
                 isShooting = false;
         }
 
-        // Kiểm tra animation isReload đã xong chưa
+        // Kiểm tra trạng thái reload
         if (isReloading)
         {
             AnimatorStateInfo stateInfo = anim.GetCurrentAnimatorStateInfo(0);
-            if (!stateInfo.IsName("isReload") || stateInfo.normalizedTime >= 1f)
+            
+            // Đợi ít nhất 0.1s để animation kịp chuyển sang trạng thái "isReload"
+            bool isCurrentlyAnimatingReload = stateInfo.IsName("isReload");
+            bool animFinished = isCurrentlyAnimatingReload && stateInfo.normalizedTime >= 0.95f;
+            
+            // Script GunFire báo đã nạp xong đạn
+            bool scriptFinished = (gunFire == null) || !gunFire.IsReloading;
+
+            // Chỉ cho phép kết thúc reload khi cả Script và Anim đều xong
+            if (scriptFinished && (animFinished || !isCurrentlyAnimatingReload))
+            {
+                // Thêm một khoảng nghỉ nhỏ để tránh spam
                 isReloading = false;
+            }
         }
 
-        // Khóa di chuyển trong suốt thời gian bắn + cooldown 0.5s
+        // Khóa di chuyển trong suốt thời gian bắn + reload + cooldown
         bool isInShootSequence = isShooting || isReloading || (Time.time < lastShootTime + shootCooldown);
 
         if (!isInShootSequence)
@@ -124,9 +143,25 @@ public class PlayerMovement : MonoBehaviour
                 }
                 else
                 {
-                    isShooting = true;
-                    lastShootTime = Time.time;
-                    anim.SetTrigger("isShoot");
+                    // Kiểm tra GunFire còn đạn không trước khi trigger animation
+                    bool canFire = (gunFire == null) || (!gunFire.IsReloading && gunFire.CurrentAmmo > 0);
+                    if (canFire)
+                    {
+                        isShooting = true;
+                        lastShootTime = Time.time;
+                        anim.SetTrigger("isShoot");
+
+                        // Bắn đạn thật (Đã chuyển sang OnFireEvent trong GunController để khớp animation)
+                        // if (gunFire != null) gunFire.TryShoot();
+                    }
+                    else if (gunFire != null && gunFire.CurrentAmmo <= 0 && !gunFire.IsReloading && !isReloading)
+                    {
+                        // Hết đạn → tự động reload
+                        isReloading = true;
+                        anim.SetTrigger("isReload");
+                        gunFire.TryReload();
+                        Debug.Log("[Player] Tu dong reload do het dan.");
+                    }
                 }
             }
         }
@@ -138,6 +173,10 @@ public class PlayerMovement : MonoBehaviour
             {
                 isReloading = true;
                 anim.SetTrigger("isReload");
+
+                // Trigger reload vật lý (nạp lại đạn)
+                if (gunFire != null)
+                    gunFire.TryReload();
             }
         }
 
